@@ -1,5 +1,7 @@
 # Archi_Simulator
 ```
 while True:
-  print("你们是什么都没写啊！")
+  if(name=="HY" or name=="LXP"):
+    print("你们快写啊！！\n")
+  print("LZT和LJF是什么都没写啊！")
 ```

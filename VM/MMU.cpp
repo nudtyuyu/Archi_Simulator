@@ -32,9 +32,55 @@ int get_free_page();
 void bread_page(int page,char*M,int file,int n);
 void oom();
 int b2d(char *num,int n);
-int WriteMem(char*buf,int addr,int n);
-int ReadMem(char*buf,int addr,int n);
+int WriteMem(char*Mem,char*buf,int addr,int n);
+int ReadMem(char*M,int addr,int n,char*buf);
+//int ReadMem(char*buf,int addr,int n);
 int bmap(int block);
+int ReadM(char*VA,char*buf,int n);
+int WriteM(char*VA,char*buf,int n);
+
+int ReadM(char*VA,char*buf,int n) //用户态的读内存
+{
+        FirstPgTBL* TBL1;
+        int32_t PA = VA2PA(VA,TBL1,0);
+        int32_t i,j=0;
+        if(buf==NULL)
+        {
+                buf = (char*)malloc(sizeof(char)*(n+1));
+                buf[n] = 0;
+        }
+        for(i = PA;i<PA+n;i++)
+        {
+                buf[j] = Mem[i];
+                j++;
+        }
+}
+
+int WriteM(char*VA,char*buf,int n) //用户态的读内存
+{
+        FirstPgTBL* TBL1;
+        int32_t PA = VA2PA(VA,TBL1,0);
+        int32_t i,j=0;
+        if(buf==NULL)
+        {
+                printf("Error! WriteMem Buffer is NULL!\n");
+                exit(0);
+        }
+        for(i = PA;i<PA+n;i++)
+        {
+                Mem[i] = buf[j];
+                j++;
+        }
+}
+
+
+/*明天（10.29）实现TLB和替换策略*/
+/*待会儿实现用户态WriteMem和ReadMem(√)*/
+/*还没有实现rdonly的一个判断问题，记得实现*/
+
+
+
+
 
 void Init_Map(char*Map)
 {
@@ -71,10 +117,32 @@ void Init_Disk(char**Disk)
         }
 }
 
-int WriteMem(char*buf,int addr,int n)
+int ReadMem(char*M,int addr,int n,char*buf) //内核态使用的readMem
+{
+        int i,j=0;
+        if(buf==NULL)
+        {
+                buf = (char*)malloc(sizeof(char)*(n+1));
+                buf[n] = 0;
+        }
+        for(i=addr;i<addr+n;i++)
+        {
+                buf[j] = M[i];
+                j++;
+        }
+        //buf[j] = 0;
+        return n;
+}
+
+int WriteMem(char* Mem,char*buf,int addr,int n)  //内核态使用的WriteMem
 {
         int i;
         int j = 0;
+        if(buf==NULL)
+        {
+                printf("Error! WriteMem Buffer is NULL!\n");
+                exit(0);
+        }
         for(i=addr;i<n+addr;i++)
         {
                 Mem[i] = buf[j];
@@ -83,7 +151,7 @@ int WriteMem(char*buf,int addr,int n)
         return n;
 }
 
-void bread_page(int page,char*M,char**Disk,int* nb)
+void bread_page(int page,char*M,char**Disk,int* nb) //将磁盘中的内容读到新分配的页中
 {
         //FILE*file;
         //file = fopen(Disk[nb],"r");
@@ -97,7 +165,7 @@ void bread_page(int page,char*M,char**Disk,int* nb)
                 {
                         buf[i] = Disk[nb[j]][i];
                 }
-                cnt = WriteMem(buf,addr,DISKBLK);
+                cnt = WriteMem(Mem,buf,addr,DISKBLK);
                 printf("buf: %d\n",buf[6]);
                 printf("%d\t%d\n",cnt,addr);
                 addr+=cnt;
@@ -105,7 +173,7 @@ void bread_page(int page,char*M,char**Disk,int* nb)
         return;
 }
 
-int get_empty_page()
+int get_empty_page() //找一个空闲页，全部置0
 {
         int i;
         int pageNum = -1;
@@ -124,11 +192,15 @@ int get_empty_page()
                 oom();
                 //exit(0);
         }
+        for(i = pageNum*PAGE_SIZE;i<pageNum*PAGE_SIZE+PAGE_SIZE;i++)
+        {
+                Mem[i] = 0;
+        }
         return pageNum;
 }
 
 
-int get_free_page()
+int get_free_page() //找一个空闲页
 {
         int i;
         int pageNum = -1;
@@ -150,7 +222,7 @@ int get_free_page()
         return pageNum;
         
 }
-void do_no_page(char*VA,void*M,unsigned long error_code)
+void do_no_page(char*VA,void*M,unsigned long error_code) //缺页处理
 {
         struct FirstPgTBL* TBL1 = (struct FirstPgTBL*) M;
         int32_t address = b2d(VA,32);
@@ -242,7 +314,7 @@ int b2d(char* num_2,int n)
 
 }
 
-int VA2PA(char* VA,void*M,int base)
+int VA2PA(char* VA,void*M,int base) //虚地址映射到实地址
 {
         char* Addr1 = (char*)malloc(sizeof(char)*(DIR_LENGTH+1)); //一级页表内偏移，+1位用来放置\0
         char* Addr2 = (char*)malloc(sizeof(char)*(PAGE_LENGTH+1));

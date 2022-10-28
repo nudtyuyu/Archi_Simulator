@@ -1,5 +1,4 @@
-#include <stdio.h>
-#include <fcntl.h>
+#include <cstdio>
 
 #define BUFSIZE 256
 typedef unsigned int uint;

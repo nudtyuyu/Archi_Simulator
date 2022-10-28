@@ -18,10 +18,82 @@ using namespace std;
 #define PAGE_LENGTH 10
 #define OFFSET_LENGTH 12
 
-void do_no_page();
+char Mem[MEMSIZE]={0};  //主存16MB
+char Busy[MEMSIZE/PAGE_SIZE]={0};
 
-void do_no_page()
+void do_no_page();
+int get_empty_page();
+void oom();
+int b2d(char *num,int n);
+
+void oom()
 {
+        printf("Critical Error: Out of Memory!\n");
+        exit(0);
+}
+
+int get_empty_page()
+{
+        int i;
+        int pageNum = -1;
+        for(i=0;i<MEMSIZE/PAGE_SIZE;i++)
+        {
+                if(Busy[i]==0)
+                {
+                        pageNum = i;
+                        Busy[i] = 1;
+                        break;
+                }
+
+        }
+        if(pageNum==-1)
+        {
+                oom();
+                //exit(0);
+        }
+        return pageNum;
+        
+}
+void do_no_page(char*VA,void*M,unsigned long error_code)
+{
+        struct FirstPgTBL* TBL1 = (struct FirstPgTBL*) M;
+        char* Addr1 = (char*)malloc(sizeof(char)*(DIR_LENGTH+1)); //一级页表内偏移，+1位用来放置\0
+        char* Addr2 = (char*)malloc(sizeof(char)*(PAGE_LENGTH+1));
+        char* Offset = (char*)malloc(sizeof(char)*(OFFSET_LENGTH+1));
+        strncpy(Addr1,VA,DIR_LENGTH);
+        strncpy(Addr2,VA+DIR_LENGTH,PAGE_LENGTH);
+        strncpy(Offset,VA+DIR_LENGTH+PAGE_LENGTH,OFFSET_LENGTH);
+        //struct Memory* Mem = (struct Memory*)M;
+        //struct FirstPgTBL* TBL1 = (struct FirstPgTBL*) M;
+        int32_t addr1 = b2d(Addr1,10);
+        int32_t addr2 = b2d(Addr2,10);
+        int32_t offset = b2d(Offset,12);
+        SecondPgTBL*tmp = (SecondPgTBL*)malloc(TABLE_SIZE*(sizeof(PgEntry))+sizeof(int));
+        Init_Second(tmp);
+        //struct DirEntry* dir = &(TBL1->entry[addr1]);
+        //struct DirEntry* dir = &(TBL1->entry[addr1]);
+        int page;
+        switch (error_code)
+        {
+                case 0:
+                        //dir->base = tmp;
+                        TBL1->entry[addr1].base = tmp;
+                        page = get_empty_page();
+                        tmp->entry[addr2].Base = page;
+                        TBL1->entry[addr1].valid = 1;
+                        tmp->entry[addr2].valid = 1;
+                        break;
+                case 1:
+                        free(tmp);
+                        //int page;
+                        page = get_empty_page();
+                        TBL1->entry[addr1].base->entry[addr2].valid = '1';
+                        TBL1->entry[addr1].base->entry[addr2].Base = page;
+                        break;
+                
+                default:
+                        break;
+        }
         return;
 }
 
@@ -60,14 +132,18 @@ int VA2PA(char* VA,void*M,int base)
        int32_t addr1 = b2d(Addr1,10);
        int32_t addr2 = b2d(Addr2,10);
        int32_t offset = b2d(Offset,12);
-       struct DirEntry dir = TBL1->entry[addr1];
-       if(!dir.valid)
+       struct DirEntry *dir = &(TBL1->entry[addr1]);
+       if(dir->valid=='0')
        {
-                do_no_page();
+                do_no_page(VA,M,0);
        }
-       struct SecondPgTBL* base2 = dir.base;
+       struct SecondPgTBL* base2 = dir->base;
+       if(base2->entry[addr2].valid=='0')
+       {
+                do_no_page(VA,M,1);
+       }
        int32_t PA_Base = (base2->entry[addr2].Base<<12) & 0xFFFFF000;
-       printf("%d\t%d\n",PA_Base,base2->entry[addr2].Base);
+       //printf("%d\t%d\n",PA_Base,base2->entry[addr2].Base);
        int PA = PA_Base | offset;
        return PA;
        /* strncpy(base2,dir.Base,20);
@@ -88,12 +164,14 @@ int main()
         struct SecondPgTBL* TBL2 = (SecondPgTBL*)malloc(TABLE_SIZE*(sizeof(PgEntry))+sizeof(int));
         //struct FirstPgTBL *TBL1;
         //struct SecondPgTBL*TBL2;
-        Init_First(TBL1);
-        Init_Second(TBL2);
+        Init_First(TBL1); //初始化一级页表
+        //Init_Second(TBL2);//初始化二级页表
 
         //strncpy(TBL1->entry[3].Base,TBL2,10);
-        TBL1->entry[3].base = TBL2;
-        TBL2->entry[3].Base = 1;
+        //随便改改一级页表和二级页表的页表项
+        //TBL1->entry[3].base = TBL2;
+        //TBL2->entry[3].Base = 1;
+        //虚实地址转换
         int32_t PA = VA2PA(VA,TBL1,0);
         printf("The Physical Address is: %d\n",PA);
         return 0;

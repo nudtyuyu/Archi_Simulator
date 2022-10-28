@@ -19,10 +19,10 @@ void Init_First(void* TB) // 一级页表初始化
         tb->size = TABLE_SIZE;
         for(i=0;i<TABLE_SIZE;i++)
         {
-                tb->entry[i].valid = '0';
+                tb->entry[i].valid = 0;
                 for(j=0;j<11;j++)
                 {
-                        tb->entry[i].Control[j]='0';
+                        tb->entry[i].Control[j]=0;
                 }
                 tb->entry[i].base = NULL;
 
@@ -41,13 +41,14 @@ void Init_Second(void* TB) //二级页表初始化
         tb->size = TABLE_SIZE;
         for(i=0;i<TABLE_SIZE;i++)
         {
-                tb->entry[i].valid = '0';
-                tb->entry[i].dirty = '0';
+                tb->entry[i].valid = 0;
+                tb->entry[i].rdonly = 0;
+                tb->entry[i].dirty = 0;
                 for(j=0;j<10;j++)
                 {
-                        tb->entry[i].Control[j]='0';
+                        tb->entry[i].Control[j]=0;
                 }
-                tb->entry[i].Base = 0;
+                tb->entry[i].Base = -1;
 
         }
 }

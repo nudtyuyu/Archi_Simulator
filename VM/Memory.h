@@ -1,7 +1,12 @@
 
 
 #define MEMSIZE 1677216  //内存大小16M
+#define DISKSIZE 4194304
+#define DISKBLK 1024
+#define MAPSIZE 4194304
+//#define FILENAME 256
 /*突然觉得......没有必要这样做，分页管理的话把一个char的数组分为很多个4096就可以了，逻辑页号就很简单了*/
+
 struct MU  //内存单元，数据位是一个字节
 {
         /* data */
@@ -20,5 +25,5 @@ struct Memory
         int size; //数据单元的个数，模拟16MB字节内存
 };
 
-void ReadMem(int addr,int size,char*buffer,void*Mem);
-void WriteMen(int addr,int size,char*buffer,void*Mem);
+//void ReadMem(int addr,int size,char*buffer,void*Mem);
+//void WriteMen(int addr,int size,char*buffer,void*Mem);

@@ -11,6 +11,7 @@
 #include  "Memory.h"
 #include <string.h>
 #include <math.h>
+#include <time.h>
 
 using namespace std;
 
@@ -18,31 +19,135 @@ using namespace std;
 #define PAGE_LENGTH 10
 #define OFFSET_LENGTH 12
 
+
 char Mem[MEMSIZE]={0};  //主存16MB
 char Busy[MEMSIZE/PAGE_SIZE]={0};
 char *Disk[DISKSIZE];
 char Map[MAPSIZE];
+struct MyTLB * TLB;
 unsigned long start_code = 0;
 
 void do_no_page();
-void Init_Disk(char**Disk);
-void Init_Map(char*Map);
-int get_empty_page();
-int get_free_page();
-void bread_page(int page,char*M,int file,int n);
-void oom();
-int b2d(char *num,int n);
-int WriteMem(char*Mem,char*buf,int addr,int n);
-int ReadMem(char*M,int addr,int n,char*buf);
+void Init_Disk(char**Disk); //初始化磁盘
+void Init_Map(char*Map); // 初始化磁盘映射表
+void Init_TLB(struct MyTLB*TLB); //初始化快表
+int get_empty_page(); //分配空页（零页）
+int get_free_page(); //获取空闲页
+void bread_page(int page,char*M,int file,int n); //从磁盘按块读取数据
+void oom(); //out of Memory
+int b2d(char *num,int n); // 将二进制字符串转为10进制int
+int WriteMem(char*Mem,char*buf,int addr,int n); //内核态写内存
+int ReadMem(char*M,int addr,int n,char*buf); //内核态读内存
 //int ReadMem(char*buf,int addr,int n);
-int bmap(int block);
-int ReadM(char*VA,char*buf,int n);
-int WriteM(char*VA,char*buf,int n);
+int bmap(int block); //映射，文件相对块->磁盘块号
+int ReadM(char*VA,char*buf,int n); //用户态读内存
+int WriteM(char*VA,char*buf,int n); //用户态写内存
+void SetTLB(MyTLB*TLB,PgEntry *entry,char*VA);
+//void TLBWriteBack();
+int32_t TLBRead(MyTLB* TLB,char*VA);
+int32_t VA2PA(char* VA,void*M,void*tlb,int op);
+int ChangePage();//页替换策略，随机法替换。
 
-int ReadM(char*VA,char*buf,int n) //用户态的读内存
+void SetTLB(MyTLB *TLB,PgEntry *entry,char*VA)
+{
+        int i;
+        int index =-1;
+        for(i=0;i<TLBSIZE;i++)
+        {
+                if(TLB->valid[i]==0 || TLB->entry[i].dirty ==1) //空闲页或者脏记录
+                {
+                        TLB->entry[i].Base = entry->Base;
+                        for(int j = 0;j<9;j++)
+                        {
+                                TLB->entry[i].Control[j] = entry->Control[j];
+                        }   
+                        TLB->entry[i].dirty = entry->dirty;
+                        TLB->entry[i].rdonly = entry->rdonly;
+                        TLB->entry[i].valid = entry->valid;
+                        int x = 6;
+                        for(int k=0;k<26;k++)
+                        {
+                                TLB->entry[i].tag[k] = VA[x];
+                                x++;
+                        }
+                        index = i;
+                        break;
+                }
+        }
+        if(index == -1) //页替换策略：FIFO
+        {
+                i = 0;
+                
+                TLB->entry[i].Base = entry->Base;
+                for(int j = 0;j<9;j++)
+                {
+                        TLB->entry[i].Control[j] = entry->Control[j];
+                }   
+                int x = 6;
+                for(int k=0;k<26;k++)
+                {
+                        TLB->entry[i].tag[k] = VA[x];
+                        x++;
+                }
+                TLB->entry[i].dirty = entry->dirty;
+                TLB->entry[i].rdonly = entry->rdonly;
+                TLB->entry[i].valid = entry->valid;
+                index = i;
+        }
+
+}
+
+int32_t TLBRead(MyTLB* TLB,char*VA)
+{
+        int i;
+        int32_t base;
+        for(i=0;i<TLBSIZE;i++)
+        {
+                if(!strncmp(TLB->entry[i].tag,VA+6,26))
+                {
+                        if(TLB->valid[i]==1)
+                        {
+                                base = TLB->entry[i].Base;
+                                return base;
+                        }
+                }
+        }
+        return -1;
+}
+
+void Init_TLB(struct MyTLB*TLB) //初始化快表
+{
+        
+        int i,j;
+        struct MyTLB*tb = TLB;
+        //tb->entry = (PgEntry*)malloc(TABLE_SIZE*(sizeof(int)+12*sizeof(char)));
+        for(i=0;i<TLBSIZE;i++)
+        {
+                tb->entry[i].valid = 0;
+                tb->entry[i].rdonly = 0;
+                tb->entry[i].dirty = 0;
+                for(j=0;j<10;j++)
+                {
+                        tb->entry[i].Control[j]=0;
+                }
+                for(j =0;j<26;j++)
+                {
+                        tb->entry[i].tag[j] = 0;
+                }
+                tb->entry[i].Base = -1;
+
+        }
+        for(i=0;i<TLBSIZE;i++)
+        {
+                tb->valid[i] = 0;
+        }
+}
+
+int ReadM(char*VA,char*buf,void*tlb,int n) //用户态的读内存
 {
         FirstPgTBL* TBL1;
-        int32_t PA = VA2PA(VA,TBL1,0);
+        MyTLB* TLB = (MyTLB*)tlb;
+        int32_t PA = VA2PA(VA,TBL1,TLB,0);
         int32_t i,j=0;
         if(buf==NULL)
         {
@@ -54,12 +159,14 @@ int ReadM(char*VA,char*buf,int n) //用户态的读内存
                 buf[j] = Mem[i];
                 j++;
         }
+        return n;
 }
 
-int WriteM(char*VA,char*buf,int n) //用户态的读内存
+int WriteM(char*VA,char*buf,void*tlb,int n) //用户态的读内存
 {
-        FirstPgTBL* TBL1;
-        int32_t PA = VA2PA(VA,TBL1,0);
+        FirstPgTBL* TBL1; //这个不对，到时候传全局变量TBL1
+        MyTLB* TLB = (MyTLB*)tlb;
+        int32_t PA = VA2PA(VA,TBL1,TLB,0);
         int32_t i,j=0;
         if(buf==NULL)
         {
@@ -71,12 +178,15 @@ int WriteM(char*VA,char*buf,int n) //用户态的读内存
                 Mem[i] = buf[j];
                 j++;
         }
+        return n;
 }
 
 
 /*明天（10.29）实现TLB和替换策略*/
 /*待会儿实现用户态WriteMem和ReadMem(√)*/
 /*还没有实现rdonly的一个判断问题，记得实现*/
+
+
 
 
 
@@ -199,6 +309,13 @@ int get_empty_page() //找一个空闲页，全部置0
         return pageNum;
 }
 
+int ChangePage()
+{
+        srand((unsigned int)time(NULL));
+        int index = 0 + rand() % ( MEMSIZE/PAGE_SIZE -0 +1 );
+        return index;
+        
+}
 
 int get_free_page() //找一个空闲页
 {
@@ -216,6 +333,8 @@ int get_free_page() //找一个空闲页
         }
         if(pageNum==-1)
         {
+                
+                //return -1; //鉴于页面替换真的复杂的有点离谱，算了。反正我的磁盘大小设计的和页面数是匹配的......
                 oom();
                 //exit(0);
         }
@@ -276,9 +395,15 @@ void do_no_page(char*VA,void*M,unsigned long error_code) //缺页处理
                                 return;
                         }
                         page = get_free_page();
+                        /* if(page==-1)
+                        {
+                                int num = ChangePage();// 页替换策略
+                                
+                        } */
                         bread_page(page,Mem,Disk,nr);
                         TBL1->entry[addr1].base->entry[addr2].valid = 1;
                         TBL1->entry[addr1].base->entry[addr2].Base = page;
+                        
                         break;
                 
                 case 3:
@@ -292,6 +417,7 @@ void do_no_page(char*VA,void*M,unsigned long error_code) //缺页处理
                 default:
                         break;
         }
+        
         return;
 }
 
@@ -314,8 +440,10 @@ int b2d(char* num_2,int n)
 
 }
 
-int VA2PA(char* VA,void*M,int base) //虚地址映射到实地址
+int32_t VA2PA(char* VA,void*M,void*tlb,int op) //虚地址映射到实地址,op表示虚实地址转换涉及的操作（读还是写）
 {
+        //op = 0 读该地址，op = 1 写该地址
+        
         char* Addr1 = (char*)malloc(sizeof(char)*(DIR_LENGTH+1)); //一级页表内偏移，+1位用来放置\0
         char* Addr2 = (char*)malloc(sizeof(char)*(PAGE_LENGTH+1));
         char* Offset = (char*)malloc(sizeof(char)*(OFFSET_LENGTH+1));
@@ -327,10 +455,20 @@ int VA2PA(char* VA,void*M,int base) //虚地址映射到实地址
        strncpy(Offset,VA+DIR_LENGTH+PAGE_LENGTH,OFFSET_LENGTH);
        //struct Memory* Mem = (struct Memory*)M;
        struct FirstPgTBL* TBL1 = (struct FirstPgTBL*) M;
+       struct MyTLB* TLB = (struct MyTLB*) tlb;
        int32_t addr1 = b2d(Addr1,10);
        int32_t addr2 = b2d(Addr2,10);
        int32_t offset = b2d(Offset,12);
+
+       int32_t BASE =TLBRead(TLB,VA);
+       if(BASE != -1 )
+       {
+                BASE  = (BASE<<(12)) &0xFFFFF000;
+                int32_t result = BASE | offset;
+                return result;
+       }
        struct DirEntry *dir = &(TBL1->entry[addr1]);
+        
        if(dir->valid==0)
        {
                 do_no_page(VA,M,0);
@@ -340,9 +478,18 @@ int VA2PA(char* VA,void*M,int base) //虚地址映射到实地址
        {
                 do_no_page(VA,M,1);
        }
+       if(op==1)
+       {
+                if(base2->entry[addr2].rdonly)
+                {
+                        printf("This address is not readable!!\n"); //因为不涉及fork进程，暂时不实现do_wp_page()
+                        exit(0);
+                }
+       }
+       SetTLB(TLB,&base2->entry[addr2],VA);
        int32_t PA_Base = (base2->entry[addr2].Base<<12) & 0xFFFFF000;
        //printf("%d\t%d\n",PA_Base,base2->entry[addr2].Base);
-       int PA = PA_Base | offset;
+       int32_t PA = PA_Base | offset;
        return PA;
        /* strncpy(base2,dir.Base,20);
        for(int i = 20;i<WORD;i++)
@@ -370,6 +517,8 @@ int main()
         Map[3] = 5; */
         Init_First(TBL1); //初始化一级页表
         Init_Disk(Disk);//初始化Disk
+        TLB = (struct MyTLB*)malloc(TLBSIZE*(sizeof(TLBEntry)+sizeof(char)));
+        Init_TLB(TLB);
         Disk[0][6] = 46;
         
 
@@ -380,7 +529,7 @@ int main()
         //TBL1->entry[3].base = TBL2;
         //TBL2->entry[3].Base = 1;
         //虚实地址转换
-        int32_t PA = VA2PA(VA,TBL1,0);
+        int32_t PA = VA2PA(VA,TBL1,TLB,0);
         printf("The Physical Address is: %d, The data is: %d",PA,Mem[PA]);
         return 0;
 }

@@ -6,6 +6,7 @@ using namespace std;
 #define TABLE_SIZE 1024
 #define WORD 32
 #define PAGE_SIZE 4096
+#define TLBSIZE 20
 struct PgEntry //二级页表页表项
 {
         /* data */
@@ -43,6 +44,28 @@ struct FirstPgTBL //一级页表
         
 };
 
+
+struct TLBEntry
+{
+        /* data */
+        //char Base[20]; 
+        int32_t Base;//物理地址，页面基址
+        char Control[9]; //其他控制位，在这里不关心，可扩展
+        char rdonly; //该页只读
+        char dirty;//脏位，表示最近该页被修改过
+        char valid;//有效位，表示页面有效
+        char tag[26];
+};
+
+
+
+struct MyTLB
+{
+        /* data */
+        //char tag[26];
+        struct TLBEntry entry[TLBSIZE];  //二级页表的页表项
+        char valid[TLBSIZE];//快表的有效位
+};
 
 
 
